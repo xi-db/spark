@@ -1695,8 +1695,18 @@ object SQLConf {
     buildConf("spark.sql.dataSource.skipAssertOnPredicatePushdown")
       .internal()
       .doc("Enable skipping assert when expression in not translated to predicate.")
+      .version("4.0.0")
       .booleanConf
       .createWithDefault(!Utils.isTesting)
+
+  val DATA_SOURCE_ALWAYS_CREATE_V2_PREDICATE =
+    buildConf("spark.sql.dataSource.alwaysCreateV2Predicate")
+      .internal()
+      .doc("When true, the v2 push-down framework always wraps the expression that returns " +
+        "boolean type with a v2 Predicate so that it can be pushed down.")
+      .version("4.1.0")
+      .booleanConf
+      .createWithDefault(true)
 
   // This is used to set the default data source
   val DEFAULT_DATA_SOURCE_NAME = buildConf("spark.sql.sources.default")
@@ -3549,6 +3559,14 @@ object SQLConf {
       .version("4.1.0")
       .fallbackConf(Python.PYTHON_WORKER_KILL_ON_IDLE_TIMEOUT)
 
+  val PYTHON_UDF_WORKER_TRACEBACK_DUMP_INTERVAL_SECONDS =
+    buildConf("spark.sql.execution.pyspark.udf.tracebackDumpIntervalSeconds")
+      .doc(
+        s"Same as ${Python.PYTHON_WORKER_TRACEBACK_DUMP_INTERVAL_SECONDS.key} " +
+          "for Python execution with DataFrame and SQL. It can change during runtime.")
+      .version("4.1.0")
+      .fallbackConf(Python.PYTHON_WORKER_TRACEBACK_DUMP_INTERVAL_SECONDS)
+
   val PYSPARK_PLOT_MAX_ROWS =
     buildConf("spark.sql.pyspark.plotting.max_rows")
       .doc("The visual limit on plots. If set to 1000 for top-n-based plots (pie, bar, barh), " +
@@ -3648,7 +3666,7 @@ object SQLConf {
         errorMsg = "The value of " +
           "spark.sql.execution.arrow.maxBytesPerBatch should be greater " +
           "than zero and less than INT_MAX.")
-      .createWithDefaultString("256MB")
+      .createWithDefaultString("64MB")
 
   val ARROW_TRANSFORM_WITH_STATE_IN_PYSPARK_MAX_STATE_RECORDS_PER_BATCH =
     buildConf("spark.sql.execution.arrow.transformWithStateInPySpark.maxStateRecordsPerBatch")
@@ -4077,6 +4095,16 @@ object SQLConf {
     .version("3.4.0")
     .booleanConf
     .createWithDefault(false)
+
+  val LEGACY_CONSECUTIVE_STRING_LITERALS =
+    buildConf("spark.sql.legacy.consecutiveStringLiterals.enabled")
+      .internal()
+      .doc("When true, consecutive string literals separated by double quotes (e.g. 'a''b') will " +
+        "be parsed as concatenated strings. This preserves pre-Spark 4.0 behavior where" +
+        "'a''b' would be parsed as 'ab' instead of 'a'b'.")
+      .version("4.1.0")
+      .booleanConf
+      .createWithDefault(false)
 
   val ANSI_RELATION_PRECEDENCE = buildConf("spark.sql.ansi.relationPrecedence")
     .doc(s"When true and '${ANSI_ENABLED.key}' is true, JOIN takes precedence over comma when " +
@@ -5607,7 +5635,7 @@ object SQLConf {
       .internal()
       .doc("When true, exclude the references from the subquery expressions (in, exists, etc.) " +
         s"while removing redundant aliases.")
-      .version("4.0.0")
+      .version("3.5.1")
       .booleanConf
       .createWithDefault(true)
 
@@ -5880,6 +5908,92 @@ object SQLConf {
         "When set to true, rules like ResolveAliases or ResolveAggregateFunctions will run " +
         "CollationTypeCasts before alias assignment. This is necessary for correct alias " +
         "generation."
+      )
+      .version("4.1.0")
+      .booleanConf
+      .createWithDefault(true)
+
+  val PIPELINES_STREAM_STATE_POLLING_INTERVAL = {
+    buildConf("spark.sql.pipelines.execution.streamstate.pollingInterval")
+      .doc(
+        "Interval in seconds at which the stream state is polled for changes. This is used to " +
+          "check if the stream has failed and needs to be restarted."
+      )
+      .version("4.1.0")
+      .timeConf(TimeUnit.SECONDS)
+      .createWithDefault(1)
+  }
+
+  val PIPELINES_WATCHDOG_MIN_RETRY_TIME_IN_SECONDS = {
+    buildConf("spark.sql.pipelines.execution.watchdog.minRetryTime")
+      .doc(
+        "Initial duration in seconds between the time when we notice a flow has failed and " +
+          "when we try to restart the flow. The interval between flow restarts doubles with " +
+          "every stream failure up to the maximum value set in " +
+          "`pipelines.execution.watchdog.maxRetryTime`."
+      )
+      .version("4.1.0")
+      .timeConf(TimeUnit.SECONDS)
+      .checkValue(v => v > 0, "Watchdog minimum retry time must be at least 1 second.")
+      .createWithDefault(5)
+  }
+
+  val PIPELINES_WATCHDOG_MAX_RETRY_TIME_IN_SECONDS = {
+    buildConf("spark.sql.pipelines.execution.watchdog.maxRetryTime")
+      .doc(
+        "Maximum time interval in seconds at which flows will be restarted."
+      )
+      .version("4.1.0")
+      .timeConf(TimeUnit.SECONDS)
+      .createWithDefault(3600)
+  }
+
+  val PIPELINES_MAX_CONCURRENT_FLOWS = {
+    buildConf("spark.sql.pipelines.execution.maxConcurrentFlows")
+      .doc(
+        "Max number of flows to execute at once. Used to tune performance for triggered " +
+          "pipelines. Has no effect on continuous pipelines."
+      )
+      .version("4.1.0")
+      .intConf
+      .createWithDefault(16)
+  }
+
+
+  val PIPELINES_TIMEOUT_MS_FOR_TERMINATION_JOIN_AND_LOCK = {
+    buildConf("spark.sql.pipelines.timeoutMsForTerminationJoinAndLock")
+      .doc("Timeout in milliseconds to grab a lock for stopping update - default is 1hr.")
+      .version("4.1.0")
+      .timeConf(TimeUnit.MILLISECONDS)
+      .checkValue(v => v > 0L, "Timeout for lock must be at least 1 millisecond.")
+      .createWithDefault(60 * 60 * 1000)
+  }
+
+  val PIPELINES_MAX_FLOW_RETRY_ATTEMPTS = {
+    buildConf("spark.sql.pipelines.maxFlowRetryAttempts")
+      .doc("Maximum number of times a flow can be retried")
+      .version("4.1.0")
+      .intConf
+      .createWithDefault(2)
+  }
+
+  val HADOOP_LINE_RECORD_READER_ENABLED =
+    buildConf("spark.sql.execution.datasources.hadoopLineRecordReader.enabled")
+      .internal()
+      .doc("Enable the imported Hadoop's LineRecordReader. This was imported and renamed to " +
+        "HadoopLineRecordReader to add support for compression option and other " +
+        "future codecs like ZSTD, etc. Setting the conf to false will use the LineRecordReader " +
+        "class from the hadoop jar instead of the imported one.")
+      .version("4.1.0")
+      .booleanConf
+      .createWithDefault(true)
+
+  val ENFORCE_TYPE_COERCION_BEFORE_UNION_DEDUPLICATION =
+    buildConf("spark.sql.enforceTypeCoercionBeforeUnionDeduplication.enabled")
+      .internal()
+      .doc(
+        "When set to true, we enforce type coercion to run before deduplication of UNION " +
+        "children outputs. Otherwise, order is relative to rule ordering."
       )
       .version("4.1.0")
       .booleanConf
@@ -6645,6 +6759,9 @@ class SQLConf extends Serializable with Logging with SqlApiConf {
 
   def pythonUDFWorkerKillOnIdleTimeout: Boolean = getConf(PYTHON_UDF_WORKER_KILL_ON_IDLE_TIMEOUT)
 
+  def pythonUDFWorkerTracebackDumpIntervalSeconds: Long =
+    getConf(PYTHON_UDF_WORKER_TRACEBACK_DUMP_INTERVAL_SECONDS)
+
   def pythonUDFArrowConcurrencyLevel: Option[Int] = getConf(PYTHON_UDF_ARROW_CONCURRENCY_LEVEL)
 
   def pythonUDFArrowFallbackOnUDT: Boolean = getConf(PYTHON_UDF_ARROW_FALLBACK_ON_UDT)
@@ -6931,6 +7048,33 @@ class SQLConf extends Serializable with Logging with SqlApiConf {
   def legacyEvalCurrentTime: Boolean = getConf(SQLConf.LEGACY_EVAL_CURRENT_TIME)
 
   def legacyOutputSchema: Boolean = getConf(SQLConf.LEGACY_KEEP_COMMAND_OUTPUT_SCHEMA)
+
+  def streamStatePollingInterval: Long = getConf(SQLConf.PIPELINES_STREAM_STATE_POLLING_INTERVAL)
+
+  def watchdogMinRetryTimeInSeconds: Long = {
+    getConf(SQLConf.PIPELINES_WATCHDOG_MIN_RETRY_TIME_IN_SECONDS)
+  }
+
+  def watchdogMaxRetryTimeInSeconds: Long = {
+    val value = getConf(SQLConf.PIPELINES_WATCHDOG_MAX_RETRY_TIME_IN_SECONDS)
+    if (value < watchdogMinRetryTimeInSeconds) {
+      throw new IllegalArgumentException(
+        "Watchdog maximum retry time must be greater than or equal to the watchdog minimum " +
+          "retry time."
+      )
+    }
+    value
+  }
+
+  def maxConcurrentFlows: Int = getConf(SQLConf.PIPELINES_MAX_CONCURRENT_FLOWS)
+
+  def timeoutMsForTerminationJoinAndLock: Long = {
+    getConf(SQLConf.PIPELINES_TIMEOUT_MS_FOR_TERMINATION_JOIN_AND_LOCK)
+  }
+
+  def maxFlowRetryAttempts: Int = getConf(SQLConf.PIPELINES_MAX_FLOW_RETRY_ATTEMPTS)
+
+  def hadoopLineRecordReaderEnabled: Boolean = getConf(SQLConf.HADOOP_LINE_RECORD_READER_ENABLED)
 
   /** ********************** SQLConf functionality methods ************ */
 
